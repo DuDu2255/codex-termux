@@ -306,7 +306,7 @@ public final class MainActivity extends Activity implements ChatService.Observer
         TextView hint = label("在浏览器中登录并输入以下验证码。", 16, INK); body.addView(hint);
         TextView code = label(service.loginCode, 28, GREEN); code.setTextIsSelectable(true); code.setPadding(0, dp(20), 0, dp(20)); body.addView(code);
         body.addView(button("复制验证码", () -> {
-            getSystemService(ClipboardManager.class).setPrimaryClip(ClipData.newPlainText("Codex 登录码", service.loginCode)); toast("已复制");
+            getSystemService(android.content.ClipboardManager.class).setPrimaryClip(ClipData.newPlainText("Codex 登录码", service.loginCode)); toast("已复制");
         }));
         loginDialog = new AlertDialog.Builder(this).setTitle("登录 ChatGPT").setView(dialogContent(body))
             .setPositiveButton("打开浏览器", null).setNegativeButton("取消登录", (d, w) -> service.cancelLogin()).create();

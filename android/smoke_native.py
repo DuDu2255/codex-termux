@@ -116,7 +116,7 @@ class Client:
         identifier = str(self.serial)
         self.send({'id': identifier, 'method': method, 'params': params})
         response = self.until(lambda e: e.get('id') == identifier and 'method' not in e)
-        assert 'error' not in response, response
+        assert 'error' not in response, (response, self.events[-6:])
         return response['result']
 
     def initialize(self):
@@ -196,6 +196,8 @@ base_url = "http://127.0.0.1:{server.server_port}/v1"
             assert result['thread']['id'] == thread
             turn = client.call('turn/start', {'threadId': thread,
                                'input': [{'type': 'text', 'text': 'Wait', 'textElements': []}]})['turn']['id']
+            if not any(e.get('method') == 'turn/started' for e in client.events):
+                client.until(lambda e: e.get('method') == 'turn/started')
             client.call('turn/interrupt', {'threadId': thread, 'turnId': turn})
             done = client.until(lambda e: e.get('method') == 'turn/completed')
             assert done['params']['turn']['status'] == 'interrupted', done

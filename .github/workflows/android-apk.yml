@@ -60,6 +60,7 @@ jobs:
         if: always()
         with:
           name: native-test-results
+          include-hidden-files: true
           path: |
             android/native-app/build/reports/tests/
             android/native-app/build/test-results/

@@ -127,7 +127,7 @@ public final class ChatService extends Service {
                 environment.put("LD_LIBRARY_PATH", nativeDir.getPath());
                 environment.put("CODEX_SELF_EXE", new File(nativeDir, "libcodex.so").getPath());
                 if (!secret.isEmpty()) environment.put(endpoint.isEmpty() ? "OPENAI_API_KEY" : "CODEX_MOBILE_API_KEY", secret);
-                Process process = builder.start();
+                java.lang.Process process = builder.start();
                 main.post(() -> {
                     if (attempt != generation) { process.destroy(); return; }
                     rpc = new RpcClient(process, main::post, new RpcClient.Listener() {
@@ -254,8 +254,8 @@ public final class ChatService extends Service {
     private void startTurn(JSONArray input) {
         rpc.request("turn/start", Json.obj("threadId", conversation.threadId(), "input", input), (result, error) -> {
             if (error != null) { fail(error); return; }
-            activeTurn = Json.object(result, "turn").optString("id");
-            if (stopRequested) stop();
+            // The response may arrive before the turn becomes interruptible.
+            // turn/started supplies activeTurn and honors an early stop request.
         });
     }
     void stop() {

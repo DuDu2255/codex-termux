@@ -2,10 +2,12 @@
 local.properties
 **/build/
 .runtime-cache/
-app/src/main/assets/bootstrap.zip*
-app/src/main/jniLibs/
-*.jks
-*.keystore
+.native-engine/
 __pycache__/
 output/
 .build-logs/
+*.jks
+*.keystore
+native-app/src/main/jniLibs/
+native-app/src/main/assets/engine-notices/
+app/

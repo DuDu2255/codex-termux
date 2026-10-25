@@ -1,4 +1,4 @@
-> **Android APK 分支**：独立安装的 Codex Terminal 说明和构建方法见 [android/README.md](android/README.md)。
+> **Android APK 分支**：本分支已改为原生 Android 聊天应用，支持文件/图片附件、历史会话和文件导出，无需 Termux。安装和构建见 [android/README.md](android/README.md)。下方保留原 CLI 项目说明。
 
 > [!NOTE]
 > ## Release policy

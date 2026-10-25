@@ -1,74 +1,44 @@
-# Codex Terminal APK
+# Codex Android — 原生聊天 APK
 
-独立的 Android 终端应用，基于 Termux 0.118.3，内置 Codex 0.163.0-termux.2。
-包名 `com.dudu.codex`，与原版 Termux 共存；不需要另装 Termux，也不需要 root。
-支持 **Android 10 及以上、ARM64**。这是首个测试版本。
+`APK` 分支现已改为原生 Android 聊天应用。没有 Termux 界面、bootstrap、PRoot、Linux 根文件系统或首次启动安装包的步骤。
 
-## 下载
+## 安装和使用
 
-打开本仓库的 **Actions → Android APK**，选择 `APK` 分支上成功的构建，
-下载 `Codex-Terminal-arm64-v8a` 构件，解压后安装 APK。
-构件下载需要登录 GitHub。不要安装名为 terminal-test-results 的测试报告。
+要求 Android 10 或以上、ARM64 手机。打开本仓库 Actions → Android APK → 最新成功任务，下载 **Codex-Android-arm64-v8a**，解压后安装其中的 APK。
 
-## 使用
+1. 在“设置”中选择“使用 ChatGPT 登录”，复制验证码并在浏览器完成登录。账号需要支持 Codex，并允许设备代码登录。
+2. 也可保存自己的 API Key；官方服务地址和模型可留空。自定义服务必须支持 Responses API，并填写 HTTPS 地址（通常以 `/v1` 结尾）和模型名称。
+3. 点击“＋ 附件”使用系统文件选择器选择文件或图片，然后发送消息。每条消息最多 8 个附件，单个最大 50 MB。
+4. “文件”菜单可导出上传的附件及模型保存的文件；“历史”可恢复对话。流式回复期间可点击“停止”。
 
-首次打开会离线解压环境并安装内置 Git、ripgrep 及其依赖，请留出约 700 MB 空间。
-完成后自动进入 Codex，按照终端提示登录。访问模型服务仍需网络和可用账号。
-退出 Codex 后回到 Bash，可运行 `codex` 再次进入，或照常使用 `pkg`、`git`。
+支持文本/代码读取、搜索、文本文件生成、图片理解、PDF 按页阅读。可以导入其他文件类型，但压缩包、Office 文档等二进制格式暂不保证可以解析。文本工具单次读写最大 1 MB。模型能力取决于所选服务；这不是离线模型。
 
-保留 Termux 的会话抽屉、长按复制粘贴、缩放、软键盘、Ctrl/Alt/Tab 和方向键。
-新终端会话自动进入 Codex；终端的 Ctrl-C、交互式命令及窗口大小变化由原版 PTY 处理。
+附件先复制到当前会话的应用私有工作区。发送时，图片和模型读取的文件内容会传给所选服务。模型写入文件或请求执行其他操作时，会显示确认对话框。聊天记录和草稿保存在本机；API Key 使用 Android Keystore 加密保存，登录令牌由引擎保存在应用私有目录。应用关闭系统备份。
 
-- 关闭自动进入：`touch ~/.codex-terminal-no-autostart`
-- 恢复自动进入：`rm ~/.codex-terminal-no-autostart`
-- 共享存储授权：`termux-setup-storage`
-- 重载键盘和颜色设置：`termux-reload-settings`
-- 无法启动时，长按桌面图标使用 Failsafe 会话排查。
+这是新应用 `com.dudu.codex`，可与旧 Codex Terminal 共存。旧版聊天/终端数据不会自动迁移。GitHub Actions 生成的是测试签名 APK，不同构建的签名可能不同；正式长期使用需设置稳定的私有签名。卸载本应用会删除本地会话和未导出的文件。
 
-独立应用拥有独立的文件、登录和配置，不会读取现有 Termux 的 `.ssh` 或 `.codex`。
-Android 文件选择器中会显示本应用的文件入口，方便手动导入项目。
+## 架构和范围
 
-## 兼容范围
-
-界面使用完整 Termux 源码。运行环境通过 PRoot 把本应用私有目录映射到
-Termux 软件要求的路径，避免改包名后 bash、apt 或动态库失效。
-因此终端中看到的 `/data/data/com.termux/files` 属于此应用自己的环境。
-PRoot 不需要 root，但增加命令执行开销，并可能受到部分手机系统限制。
-
-`pkg` 使用 Termux 官方软件源，联网安装更多工具。原版 Termux:API、Widget、Boot
-等插件与不同包名、签名的应用不能直接通用。嵌套 PRoot、后台常驻、浏览器回调登录
-和所有软件包尚不能保证在每个 Android 系统上等效；设备码登录可作为浏览器回调的替代方式。
-语音功能受所用 Codex Termux 版本本身的限制。
-
-目前 Actions 产物为测试签名，每次全新构建的签名可能变化。正式长期分发前应配置
-固定的私有发布签名；不要把签名密钥提交到仓库。
+- Java 原生 Activity / Service / Android 系统文件选择器，无 WebView。
+- APK 内置 Android ARM64 Codex 引擎，通过 JSON-lines `app-server` 协议通信。
+- 引擎由 Android 安装器从 APK 的 `lib/arm64-v8a` 解压到 `nativeLibraryDir`，直接运行。无需安装 Termux，也不读取 Termux 的配置或目录。
+- Android 原生文件工具负责文本、图片、PDF；只允许访问当前会话工作区。
+- 不提供完整 Linux 环境，也不附带 Git、Python、Node、npm 或 pkg。
+- 构建来源、校验与引擎文件名适配见 [NATIVE-ENGINE.md](NATIVE-ENGINE.md)。
 
 ## 构建
 
-Linux x86_64，JDK 11、Python 3.12+、Android SDK 30、Build Tools 30.0.3、NDK 22.1.7171670：
+需要 Python 3.11+、JDK 17、Android SDK 35 / Build Tools 35.0.0。
 
 ```sh
 cd android
-python3 prepare_runtime.py
-./gradlew :terminal-emulator:testDebugUnitTest :app:assembleDebug
+python3 prepare_native.py
+./gradlew :native-app:testDebugUnitTest :native-app:assembleDebug
+python3 inspect_apk.py native-app/build/outputs/apk/debug/native-app-debug.apk
 ```
 
-输出在 `app/build/outputs/apk/debug/`。初次构建联网下载运行时，所有下载都由
-`runtime.lock.json` 固定版本并校验 SHA-256/SHA-512；不使用构建者的本地账号数据。
-GitHub Actions 在向 `APK` 分支推送 Android 改动时自动构建。
-Fork 仓库首次使用时，仓库所有者可能需要先在 Actions 页面启用工作流。
+输出：`native-app/build/outputs/apk/debug/native-app-debug.apk`。
 
-在 Android ARM64 的终端中，可运行以下测试，它在临时目录验证完整离线初始化、
-Codex 启动、Git、ripgrep 和 apt 依赖状态，不安装应用或修改现有 Termux 环境：
+`prepare_native.py` 下载并校验锁定的引擎包。应用首次启动不下载运行环境；登录和聊天仍需联网。GitHub Actions 执行单元测试、构建、APK 内容检查、签名校验，生成 APK 和 SHA256SUMS。
 
-```sh
-python3 prepare_runtime.py
-python3 smoke_runtime.py
-```
-
-该测试不代替 APK 安装、键盘、登录、后台和界面的真机验收。
-
-## 许可证
-
-Android 界面基于 GPLv3 的 Termux，保留 [LICENSE.md](LICENSE.md)。
-Codex 是独立执行的 Apache-2.0 程序。来源、修改范围及运行时依赖见 [UPSTREAM.md](UPSTREAM.md)。
+实际 Android ARM64 主机可运行 `python3 smoke_native.py`，在清除 Termux 环境的子进程内验证协议和本地模拟服务，不使用真实账号或付费 API。桌面 CI 的编译通过不等于已通过手机安装、真实账号登录或文件选择器实测。

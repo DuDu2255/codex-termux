@@ -10,6 +10,7 @@ import android.net.Uri;
 import android.os.*;
 import android.text.*;
 import android.view.*;
+import android.view.inputmethod.EditorInfo;
 import android.widget.*;
 import org.json.*;
 import java.io.*;
@@ -26,7 +27,7 @@ public final class MainActivity extends Activity implements ChatService.Observer
     private TextView subtitle, title;
     private EditText compose;
     private Button send, attach, history, files, fresh;
-    private String displayedChat = "", exportPath = "", exportWorkspace = "", pickerChat = "";
+    private String displayedChat = "", exportPath = "", exportWorkspace = "", pickerChat = "", displayedAttachments = "";
     private final Map<String, TextView> bubbles = new LinkedHashMap<>();
     private AlertDialog approvalDialog, loginDialog;
     private JSONObject shownQuestion;
@@ -113,14 +114,15 @@ public final class MainActivity extends Activity implements ChatService.Observer
         compose = new EditText(this); compose.setTextSize(16); compose.setTextColor(INK);
         compose.setHint("发送消息，或添加文件…"); compose.setMinLines(1); compose.setMaxLines(6);
         compose.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE | android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        compose.setImeOptions(EditorInfo.IME_ACTION_NONE | EditorInfo.IME_FLAG_NO_ENTER_ACTION | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
         compose.setBackground(background(0xfff1f4f5, 16)); compose.setPadding(dp(14), dp(12), dp(14), dp(12));
         compose.setSaveEnabled(false);
         compose.addTextChangedListener(new TextWatcher() {
             public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
-            public void onTextChanged(CharSequence s, int start, int before, int count) {
-                if (!rendering && service != null) service.draft(s.toString());
+            public void onTextChanged(CharSequence s, int start, int before, int count) { }
+            public void afterTextChanged(Editable text) {
+                if (!rendering && service != null) service.draft(text.toString());
             }
-            public void afterTextChanged(Editable e) { }
         });
         composer.addView(compose);
         LinearLayout actions = row(); attach = button("＋ 附件", this::pickFiles);
@@ -130,7 +132,12 @@ public final class MainActivity extends Activity implements ChatService.Observer
         send = button("发送", () -> {
             if (service == null) return;
             if (service.busy) service.stop();
-            else service.send(compose.getText().toString(), service.draftAttachments());
+            else if (service.send(compose.getText().toString(), service.draftAttachments())) {
+                // Only an accepted send-button click clears the editor. Rendering
+                // must never replace the IME's Editable or its composing spans.
+                rendering = true;
+                try { compose.getText().clear(); } finally { rendering = false; }
+            }
         });
         send.setEnabled(false); actions.addView(send); composer.addView(actions); root.addView(composer);
     }
@@ -140,11 +147,14 @@ public final class MainActivity extends Activity implements ChatService.Observer
         try {
             Conversation chat = service.conversation;
             boolean newChat = !displayedChat.equals(chat.id());
+            boolean messagesChanged = newChat;
             boolean nearBottom = newChat || scroll.getChildAt(0).getHeight() - scroll.getHeight() - scroll.getScrollY() < dp(140);
-            if (newChat) { displayedChat = chat.id(); messages.removeAllViews(); bubbles.clear(); }
+            if (newChat) {
+                displayedChat = chat.id(); messages.removeAllViews(); bubbles.clear(); displayedAttachments = "";
+                String draft = chat.data.optString("draftText");
+                compose.setText(draft); compose.setSelection(draft.length());
+            }
             title.setText("Codex"); subtitle.setText(service.status);
-            String draft = chat.data.optString("draftText");
-            if (!compose.getText().toString().equals(draft)) { compose.setText(draft); compose.setSelection(draft.length()); }
             JSONArray items = chat.messages();
             if (items.length() == 0 && messages.getChildCount() == 0) {
                 LinearLayout welcome = column(); welcome.setPadding(dp(16), dp(48), dp(16), dp(36));
@@ -157,6 +167,7 @@ public final class MainActivity extends Activity implements ChatService.Observer
                 JSONObject item = items.optJSONObject(i); String id = item.optString("id");
                 TextView bubble = bubbles.get(id); String role = item.optString("role");
                 if (bubble == null) {
+                    messagesChanged = true;
                     LinearLayout container = column(); container.setPadding(dp(14), dp(12), dp(14), dp(12));
                     container.setBackground(background(role.equals("user") ? 0xffe3f2ed : role.equals("error") ? 0xffffeeeb : Color.WHITE, 16));
                     TextView who = label(role.equals("user") ? "你" : role.equals("error") ? "提示" : "Codex", 12, MUTED);
@@ -170,21 +181,27 @@ public final class MainActivity extends Activity implements ChatService.Observer
                 JSONArray attached = Json.array(item, "attachments");
                 for (int j = 0; j < attached.length(); j++) text.append("\n📎 ").append(attached.optJSONObject(j).optString("name"));
                 String value = text.length() == 0 ? "…" : text.toString();
-                if (!bubble.getText().toString().equals(value)) bubble.setText(value);
+                if (!bubble.getText().toString().equals(value)) { bubble.setText(value); messagesChanged = true; }
             }
-            attachments.removeAllViews();
             JSONArray draftFiles = service.draftAttachments();
-            for (int i = 0; i < draftFiles.length(); i++) {
-                int index = i; JSONObject file = draftFiles.optJSONObject(i);
-                Button chip = button("📎 " + file.optString("name") + "   ×", () -> service.removeAttachment(index));
-                chip.setGravity(Gravity.START | Gravity.CENTER_VERTICAL); chip.setEnabled(!service.busy && !service.importing);
-                attachments.addView(chip, new LinearLayout.LayoutParams(-1, dp(40)));
+            String attachmentState = draftFiles.toString();
+            if (!displayedAttachments.equals(attachmentState)) {
+                displayedAttachments = attachmentState; attachments.removeAllViews();
+                for (int i = 0; i < draftFiles.length(); i++) {
+                    int index = i; JSONObject file = draftFiles.optJSONObject(i);
+                    Button chip = button("📎 " + file.optString("name") + "   ×", () -> service.removeAttachment(index));
+                    chip.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+                    attachments.addView(chip, new LinearLayout.LayoutParams(-1, dp(40)));
+                }
             }
             boolean idle = !service.busy && !service.importing;
+            for (int i = 0; i < attachments.getChildCount(); i++) attachments.getChildAt(i).setEnabled(idle);
             fresh.setEnabled(idle); history.setEnabled(idle); attach.setEnabled(idle && draftFiles.length() < 8);
             send.setText(service.busy ? "停止" : "发送");
             send.setEnabled(service.busy || (service.ready && !service.importing && !service.loggingIn));
-            if (nearBottom) scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
+            // fullScroll() also moves focus, which terminates keyboard/voice IME
+            // composition. Scroll by coordinates only when messages changed.
+            if (nearBottom && messagesChanged) scroll.post(() -> scroll.scrollTo(0, messages.getHeight()));
             if (resumed) { showApproval(); showLogin(); }
         } finally { rendering = false; }
     }
@@ -287,7 +304,7 @@ public final class MainActivity extends Activity implements ChatService.Observer
         body.addView(login);
         body.addView(button("退出登录并清除密钥", () -> { service.logout(); dialog.dismiss(); }));
         body.addView(button("重新连接", () -> { service.connect(); dialog.dismiss(); }));
-        TextView version = label("Codex Android 0.2.1 · 原生聊天\n附件：每条消息最多 8 个，单个不超过 50 MB", 12, MUTED);
+        TextView version = label("Codex Android 0.2.2 · 原生聊天\n附件：每条消息最多 8 个，单个不超过 50 MB", 12, MUTED);
         version.setPadding(0, dp(12), 0, 0); body.addView(version);
         dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
             String secret = key.getText().toString().trim();

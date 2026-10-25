@@ -41,6 +41,9 @@ final class RpcClient implements AutoCloseable {
     }
 
     void request(String method, JSONObject params, Callback callback) {
+        request(method, params, 90000, callback);
+    }
+    synchronized void request(String method, JSONObject params, long timeoutMillis, Callback callback) {
         if (closed) { callbacks.execute(() -> callback.done(null, "连接已关闭，请重新连接")); return; }
         String id = Long.toString(ids.incrementAndGet());
         pending.put(id, callback);
@@ -48,7 +51,7 @@ final class RpcClient implements AutoCloseable {
         timer.schedule(() -> {
             Callback expired = pending.remove(id);
             if (expired != null) callbacks.execute(() -> expired.done(null, "请求超时：" + method));
-        }, 90, TimeUnit.SECONDS);
+        }, timeoutMillis, TimeUnit.MILLISECONDS);
     }
     void notify(String method) { send(Json.obj("method", method)); }
     void respond(Object id, JSONObject result) { send(Json.obj("id", id, "result", result)); }
@@ -73,10 +76,12 @@ final class RpcClient implements AutoCloseable {
                     Callback callback = pending.remove(message.optString("id"));
                     if (callback != null) {
                         JSONObject error = message.optJSONObject("error");
-                        callbacks.execute(() -> callback.done(message.optJSONObject("result"),
-                            error == null ? null : error.optString("message", error.toString())));
+                        callbacks.execute(() -> {
+                            if (!closed) callback.done(message.optJSONObject("result"),
+                                error == null ? null : error.optString("message", error.toString()));
+                        });
                     }
-                } else callbacks.execute(() -> listener.event(message));
+                } else callbacks.execute(() -> { if (!closed) listener.event(message); });
             }
             if (!closed) {
                 String detail;

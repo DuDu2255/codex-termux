@@ -70,4 +70,27 @@ public class RpcClientTest {
             assertTrue(listener.disconnected.await(2, TimeUnit.SECONDS));
         }
     }
+    @Test(timeout = 5000) public void timeoutCompletesOnceAndTransportRemainsUsable() throws Exception {
+        FakeProcess process = new FakeProcess(); Listener listener = new Listener();
+        try (RpcClient client = new RpcClient(process, Runnable::run, listener)) {
+            CountDownLatch expired = new CountDownLatch(1), complete = new CountDownLatch(1);
+            AtomicInteger calls = new AtomicInteger(); AtomicReference<String> error = new AtomicReference<>();
+            client.request("initialize", Json.obj(), 30, (r, e) -> { calls.incrementAndGet(); error.set(e); expired.countDown(); });
+            JSONObject first = process.request(); assertTrue(expired.await(2, TimeUnit.SECONDS)); assertNotNull(error.get());
+            process.emit(Json.obj("id", first.opt("id"), "result", Json.obj()));
+            client.request("account/read", Json.obj(), (r, e) -> complete.countDown());
+            JSONObject second = process.request(); process.emit(Json.obj("id", second.opt("id"), "result", Json.obj()));
+            assertTrue(complete.await(2, TimeUnit.SECONDS)); assertEquals(1, calls.get());
+        }
+    }
+    @Test(timeout = 5000) public void queuedEventsFromClosedConnectionAreDiscarded() throws Exception {
+        FakeProcess process = new FakeProcess(); Listener listener = new Listener();
+        BlockingQueue<Runnable> callbacks = new LinkedBlockingQueue<>();
+        try (RpcClient client = new RpcClient(process, callbacks::add, listener)) {
+            process.emit(Json.obj("method", "item/agentMessage/delta", "params", Json.obj("delta", "旧连接")));
+            Runnable queued = callbacks.poll(2, TimeUnit.SECONDS); assertNotNull(queued);
+            client.close(); queued.run();
+            assertEquals(1, listener.event.getCount());
+        }
+    }
 }

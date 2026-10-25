@@ -17,18 +17,29 @@ public final class ChatService extends Service {
     interface Observer { void changed(); }
     final Handler main = new Handler(Looper.getMainLooper());
     final ExecutorService worker = Executors.newSingleThreadExecutor();
+    private final ExecutorService engineWorker = Executors.newSingleThreadExecutor();
     final List<Observer> observers = new ArrayList<>();
     final ArrayDeque<JSONObject> questions = new ArrayDeque<>();
     Conversation conversation;
-    boolean ready, busy, importing, loggingIn;
+    boolean ready, busy, importing, loggingIn, connecting;
     String status = "正在启动…", activeTurn = "", loginUrl = "", loginCode = "";
     private RpcClient rpc;
     private int generation;
+    private int reconnectAttempts;
+    private boolean destroyed;
     private boolean stopRequested, loginOnConnect;
     private String loginId = "";
     private String attachedThread = "";
     private final LocalBinder binder = new LocalBinder();
     private final Runnable persist = this::save;
+    private final Runnable persistDraft = this::saveDraft;
+    private final Runnable reconnect = this::reconnectIfNeeded;
+    private void reconnectIfNeeded() {
+        if (!destroyed && !observers.isEmpty() && !ready && !connecting) {
+            if (busy || loggingIn || importing) main.postDelayed(reconnect, 500);
+            else startConnection();
+        }
+    }
 
     @Override public void onCreate() {
         super.onCreate();
@@ -44,9 +55,13 @@ public final class ChatService extends Service {
         return true;
     }
     @Override public void onDestroy() {
-        main.removeCallbacks(persist); save(); generation++; if (rpc != null) rpc.close(); worker.shutdown(); super.onDestroy();
+        destroyed = true; main.removeCallbacks(persist); main.removeCallbacks(persistDraft); main.removeCallbacks(reconnect);
+        save(); generation++; if (rpc != null) rpc.close(); engineWorker.shutdown(); worker.shutdown(); super.onDestroy();
     }
-    void observe(Observer observer) { observers.add(observer); observer.changed(); }
+    void observe(Observer observer) {
+        observers.add(observer); observer.changed();
+        if (!ready && !connecting) connect();
+    }
     void removeObserver(Observer observer) { observers.remove(observer); }
     private void changed() {
         for (Observer observer : new ArrayList<>(observers)) observer.changed();
@@ -57,7 +72,16 @@ public final class ChatService extends Service {
         try { return directory.getCanonicalFile(); } catch (IOException e) { return directory; }
     }
     JSONArray draftAttachments() { return Json.array(conversation.data, "draftAttachments"); }
-    void draft(String text) { Json.put(conversation.data, "draftText", text); changed(); }
+    void draft(String text) {
+        Json.put(conversation.data, "draftText", text);
+        // Typing is local editor state: do not re-render the chat or serialize
+        // its full history on every IME composition/voice-recognition update.
+        main.removeCallbacks(persistDraft); main.postDelayed(persistDraft, 800);
+    }
+    private void saveDraft() {
+        if (conversation != null) getSharedPreferences("ui", 0).edit()
+            .putString("draft." + conversation.id(), conversation.data.optString("draftText")).apply();
+    }
     void removeAttachment(int index) {
         if (busy || importing) return;
         JSONArray files = draftAttachments(); files.remove(index); Json.put(conversation.data, "draftAttachments", files); changed();
@@ -65,12 +89,16 @@ public final class ChatService extends Service {
     private Conversation load(String id) {
         if (id.matches("[a-f0-9-]{36}")) try {
             AtomicFile file = new AtomicFile(new File(getFilesDir(), "chats/" + id + ".json"));
-            return new Conversation(Json.parse(new String(file.readFully(), StandardCharsets.UTF_8)));
+            Conversation restored = new Conversation(Json.parse(new String(file.readFully(), StandardCharsets.UTF_8)));
+            SharedPreferences ui = getSharedPreferences("ui", 0);
+            if (ui.contains("draft." + id)) Json.put(restored.data, "draftText", ui.getString("draft." + id, ""));
+            return restored;
         } catch (Exception ignored) { }
         return Conversation.create();
     }
     private void save() {
         if (conversation == null) return;
+        main.removeCallbacks(persistDraft); saveDraft();
         File directory = new File(getFilesDir(), "chats"); directory.mkdirs();
         File target = new File(directory, conversation.id() + ".json");
         byte[] content = conversation.data.toString().getBytes(StandardCharsets.UTF_8);
@@ -101,10 +129,15 @@ public final class ChatService extends Service {
     }
 
     void connect() {
-        if (busy || loggingIn || importing) return;
+        if (destroyed || busy || loggingIn || importing || connecting) return;
+        reconnectAttempts = 0; main.removeCallbacks(reconnect); startConnection();
+    }
+    private void startConnection() {
+        if (destroyed) return;
+        connecting = true;
         ready = false; status = "正在启动…"; attachedThread = ""; questions.clear();
         int attempt = ++generation; if (rpc != null) rpc.close(); changed();
-        worker.execute(() -> {
+        engineWorker.execute(() -> {
             try {
                 File home = new File(getFilesDir(), "engine-home"); home.mkdirs();
                 File codexHome = new File(home, ".codex"); codexHome.mkdirs();
@@ -134,24 +167,51 @@ public final class ChatService extends Service {
                         public void event(JSONObject message) { if (attempt == generation) onEvent(message); }
                         public void disconnected(String reason) {
                             if (attempt != generation) return;
-                            ready = false; busy = false; loggingIn = false; activeTurn = ""; questions.clear();
-                            status = "连接已断开"; conversation.append("error", reason, null); foreground(); changed();
+                            connectionFailed(reason);
                         }
                     });
-                    rpc.request("initialize", Json.obj("clientInfo", Json.obj("name", "codex_android", "title", "Codex Android", "version", "0.2.1"),
-                        "capabilities", Json.obj("experimentalApi", true)), (result, error) -> {
+                    rpc.request("initialize", Json.obj("clientInfo", Json.obj("name", "codex_android", "title", "Codex Android", "version", "0.2.2"),
+                        "capabilities", Json.obj("experimentalApi", true)), 15000, (result, error) -> {
                         if (attempt != generation) return;
-                        if (error != null) { fail(error); return; }
-                        rpc.notify("initialized"); ready = true; status = "已就绪"; changed();
+                        if (error != null) { connectionFailed(error); return; }
+                        rpc.notify("initialized"); status = "正在读取登录状态…"; changed();
                         if (!secret.isEmpty() && endpoint.isEmpty()) rpc.request("account/login/start",
-                            Json.obj("type", "apiKey", "apiKey", secret), (r, e) -> { if (e != null) fail(e); else refreshAccount(); });
-                        else if (!endpoint.isEmpty()) { status = "自定义服务 · 已就绪"; changed(); }
-                        else if (loginOnConnect) { loginOnConnect = false; deviceLogin(); }
-                        else refreshAccount();
+                            Json.obj("type", "apiKey", "apiKey", secret), (r, e) -> {
+                                if (attempt != generation) return;
+                                if (e != null) { connectionFailed(e); return; }
+                                connected(attempt, "API Key 已设置");
+                            });
+                        else {
+                            connected(attempt, endpoint.isEmpty() ? "已就绪" : "自定义服务 · 已就绪");
+                            if (loginOnConnect) { loginOnConnect = false; deviceLogin(); }
+                            else if (endpoint.isEmpty()) refreshAccount();
+                        }
                     });
                 });
-            } catch (Exception e) { main.post(() -> { if (attempt == generation) { ready = false; fail("启动失败：" + e.getMessage()); } }); }
+            } catch (Exception e) { main.post(() -> { if (attempt == generation) connectionFailed("启动失败：" + e.getMessage()); }); }
         });
+    }
+    private void connected(int attempt, String message) {
+        connecting = false; ready = true; status = message; changed();
+        main.postDelayed(() -> { if (generation == attempt && ready) reconnectAttempts = 0; }, 30000);
+    }
+    private void connectionFailed(String reason) {
+        if (destroyed) return;
+        generation++; if (rpc != null) rpc.close();
+        boolean interrupted = busy || loggingIn;
+        ready = false; connecting = false; busy = false; loggingIn = false;
+        activeTurn = ""; attachedThread = ""; loginUrl = ""; loginCode = ""; questions.clear();
+        main.removeCallbacks(reconnect);
+        if (!observers.isEmpty() && reconnectAttempts < 3) {
+            long delay = 500L << reconnectAttempts++;
+            status = "连接中断，正在重连（" + reconnectAttempts + "/3）…";
+            main.postDelayed(reconnect, delay);
+        } else {
+            status = "连接已断开，可在设置中重新连接";
+            if (!interrupted) conversation.append("error", reason, null);
+        }
+        if (interrupted) conversation.append("error", "本次操作因连接中断而停止；已保留草稿，请连接恢复后重试。\n" + reason, null);
+        foreground(); changed();
     }
     private static String toml(String value) { return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\""; }
     void refreshAccount() {
@@ -179,7 +239,9 @@ public final class ChatService extends Service {
         loggingIn = false; loginUrl = ""; loginCode = ""; loginId = ""; status = "已取消登录"; foreground(); changed();
     }
     void settings(String endpoint, String model, String key, Runnable completed) {
-        if (busy || importing || loggingIn) { fail("请先结束当前操作再修改连接设置"); return; }
+        if (busy || importing || loggingIn || connecting) {
+            conversation.append("error", "请先结束当前操作再修改连接设置", null); changed(); return;
+        }
         if (!endpoint.isEmpty()) {
             Uri uri = Uri.parse(endpoint);
             if (!"https".equals(uri.getScheme()) || uri.getHost() == null || uri.getEncodedAuthority().contains("@") || uri.getQuery() != null || uri.getFragment() != null || endpoint.matches(".*[\\s\\p{Cntrl}].*")) {
@@ -187,11 +249,18 @@ public final class ChatService extends Service {
             }
             if (model.isEmpty()) { fail("自定义服务需要填写模型名称"); return; }
         }
+        SharedPreferences previous = getSharedPreferences("settings", 0);
+        boolean restart = key != null || !endpoint.equals(previous.getString("endpoint", ""));
+        boolean modelChanged = !model.equals(previous.getString("model", ""));
         worker.execute(() -> {
             try {
                 if (key != null) SecretStore.save(this, key);
                 getSharedPreferences("settings", 0).edit().putString("endpoint", endpoint).putString("model", model).commit();
-                main.post(() -> { completed.run(); connect(); });
+                main.post(() -> {
+                    if (modelChanged) attachedThread = "";
+                    completed.run();
+                    if (restart || !ready) connect(); else changed();
+                });
             } catch (Exception e) { main.post(() -> fail("设置保存失败：" + e.getMessage())); }
         });
     }
@@ -222,15 +291,17 @@ public final class ChatService extends Service {
             });
         });
     }
-    void send(String text, JSONArray attachments) {
-        if (!ready || busy || importing || loggingIn || (text.trim().isEmpty() && attachments.length() == 0)) return;
+    boolean send(String text, JSONArray attachments) {
+        if (!ready || busy || importing || loggingIn || (text.trim().isEmpty() && attachments.length() == 0)) return false;
         busy = true; stopRequested = false; activeTurn = ""; status = "正在处理…"; foreground();
         conversation.append("user", text, attachments); File root = workspace(); changed();
         Json.put(conversation.data, "draftText", ""); Json.put(conversation.data, "draftAttachments", new JSONArray());
+        saveDraft();
         worker.execute(() -> {
             try { JSONArray input = NativeFiles.inputs(root, text, attachments); main.post(() -> ensureThread(root, input)); }
             catch (Exception e) { main.post(() -> fail(e.getMessage())); }
         });
+        return true;
     }
     private void ensureThread(File root, JSONArray input) {
         if (stopRequested) { finishTurn(); return; }
@@ -288,8 +359,8 @@ public final class ChatService extends Service {
         }
         if (!p.optString("threadId", conversation.threadId()).equals(conversation.threadId())) return;
         switch (method) {
-            case "item/agentMessage/delta": conversation.delta(p.optString("itemId"), p.optString("delta")); break;
-            case "turn/started": activeTurn = Json.object(p, "turn").optString("id"); if (stopRequested) stop(); break;
+            case "item/agentMessage/delta": status = "正在回复…"; conversation.delta(p.optString("itemId"), p.optString("delta")); break;
+            case "turn/started": status = "正在等待服务回复…"; activeTurn = Json.object(p, "turn").optString("id"); if (stopRequested) stop(); break;
             case "item/started": {
                 JSONObject item = Json.object(p, "item"); String type = item.optString("type");
                 if (type.equals("commandExecution")) status = "正在执行操作…";

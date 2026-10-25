@@ -287,7 +287,7 @@ public final class MainActivity extends Activity implements ChatService.Observer
         body.addView(login);
         body.addView(button("退出登录并清除密钥", () -> { service.logout(); dialog.dismiss(); }));
         body.addView(button("重新连接", () -> { service.connect(); dialog.dismiss(); }));
-        TextView version = label("Codex Android 0.2.0 · 原生聊天\n附件：每条消息最多 8 个，单个不超过 50 MB", 12, MUTED);
+        TextView version = label("Codex Android 0.2.1 · 原生聊天\n附件：每条消息最多 8 个，单个不超过 50 MB", 12, MUTED);
         version.setPadding(0, dp(12), 0, 0); body.addView(version);
         dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
             String secret = key.getText().toString().trim();

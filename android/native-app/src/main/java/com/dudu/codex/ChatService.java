@@ -138,7 +138,7 @@ public final class ChatService extends Service {
                             status = "连接已断开"; conversation.append("error", reason, null); foreground(); changed();
                         }
                     });
-                    rpc.request("initialize", Json.obj("clientInfo", Json.obj("name", "codex_android", "title", "Codex Android", "version", "0.2.0"),
+                    rpc.request("initialize", Json.obj("clientInfo", Json.obj("name", "codex_android", "title", "Codex Android", "version", "0.2.1"),
                         "capabilities", Json.obj("experimentalApi", true)), (result, error) -> {
                         if (attempt != generation) return;
                         if (error != null) { fail(error); return; }

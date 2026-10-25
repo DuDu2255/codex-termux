@@ -1,0 +1,10 @@
+.gradle/
+local.properties
+**/build/
+.runtime-cache/
+app/src/main/assets/bootstrap.zip*
+app/src/main/jniLibs/
+*.jks
+*.keystore
+__pycache__/
+output/

@@ -1,0 +1,4 @@
+#!/data/data/com.termux/files/usr/bin/sh
+set -eu
+[ "$#" -eq 1 ] || { echo '用法: termux-open-url URL' >&2; exit 2; }
+exec /system/bin/am start --user 0 -a android.intent.action.VIEW -d "$1"

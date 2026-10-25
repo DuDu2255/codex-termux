@@ -1,3 +1,5 @@
+> **Android APK 分支**：独立安装的 Codex Terminal 说明和构建方法见 [android/README.md](android/README.md)。
+
 > [!NOTE]
 > ## Release policy
 >

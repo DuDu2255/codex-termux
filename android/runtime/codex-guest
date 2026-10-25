@@ -1,0 +1,13 @@
+#!/system/bin/sh
+set -eu
+export HOME=/data/data/com.termux/files/home
+export PREFIX=/data/data/com.termux/files/usr
+export TERMUX__ROOTFS_DIR=/data/data/com.termux/files
+export TERMUX__HOME="$HOME" TERMUX__PREFIX="$PREFIX"
+export PATH="$PREFIX/libexec/codex-tools:$PREFIX/bin:/system/bin"
+export TMPDIR="$PREFIX/tmp"
+export LD_LIBRARY_PATH="$PREFIX/lib"
+export SHELL="$PREFIX/bin/bash"
+unset LD_PRELOAD PROOT_LOADER PROOT_TMP_DIR PROOT_NO_SECCOMP
+# Arguments stay separate throughout; user commands are never re-parsed by sh -c.
+exec "$@"

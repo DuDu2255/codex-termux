@@ -1,0 +1,6 @@
+#!/data/data/com.termux/files/usr/bin/sh
+set -eu
+CODEX_BUNDLE="$PREFIX/opt/codex"
+export CODEX_SELF_EXE="$CODEX_BUNDLE/bin/codex.bin"
+export LD_LIBRARY_PATH="$CODEX_BUNDLE/bin"
+exec "$CODEX_SELF_EXE" "$@"

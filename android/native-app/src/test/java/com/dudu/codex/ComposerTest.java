@@ -18,6 +18,7 @@ import org.robolectric.util.ReflectionHelpers;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.CountDownLatch;
 import static org.junit.Assert.*;
 import static org.robolectric.Shadows.shadowOf;
 
@@ -112,5 +113,22 @@ public class ComposerTest {
         assertFalse(service.main.hasCallbacks(reconnect));
         ime.commitText("还没写完，继续输入", 1); flushUi();
         assertEquals("还没写完，继续输入", editor.getText().toString());
+    }
+    @Test public void disconnectedPendingSendCannotSubmitIntoAnotherConversation() throws Exception {
+        service.getSystemService(android.app.NotificationManager.class).createNotificationChannel(
+            new android.app.NotificationChannel("chat", "Chat", android.app.NotificationManager.IMPORTANCE_LOW));
+        CountDownLatch release = new CountDownLatch(1);
+        service.worker.execute(() -> { try { release.await(2, TimeUnit.SECONDS); } catch (InterruptedException e) { Thread.currentThread().interrupt(); } });
+        try {
+            assertTrue(service.send("正在准备的旧消息", new org.json.JSONArray()));
+            ReflectionHelpers.callInstanceMethod(service, "connectionFailed",
+                ReflectionHelpers.ClassParameter.from(String.class, "test disconnect"));
+            service.select(null); service.draft("新对话草稿");
+        } finally { release.countDown(); }
+        service.worker.submit(() -> { }).get(2, TimeUnit.SECONDS); flushUi();
+        assertEquals(0, service.conversation.messages().length());
+        assertEquals("", service.conversation.threadId());
+        assertEquals("新对话草稿", editor.getText().toString());
+        assertFalse(service.busy);
     }
 }

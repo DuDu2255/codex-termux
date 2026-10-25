@@ -295,11 +295,18 @@ public final class ChatService extends Service {
         if (!ready || busy || importing || loggingIn || (text.trim().isEmpty() && attachments.length() == 0)) return false;
         busy = true; stopRequested = false; activeTurn = ""; status = "正在处理…"; foreground();
         conversation.append("user", text, attachments); File root = workspace(); changed();
+        int attempt = generation; String chatId = conversation.id();
         Json.put(conversation.data, "draftText", ""); Json.put(conversation.data, "draftAttachments", new JSONArray());
         saveDraft();
         worker.execute(() -> {
-            try { JSONArray input = NativeFiles.inputs(root, text, attachments); main.post(() -> ensureThread(root, input)); }
-            catch (Exception e) { main.post(() -> fail(e.getMessage())); }
+            try {
+                JSONArray input = NativeFiles.inputs(root, text, attachments);
+                main.post(() -> {
+                    if (generation == attempt && conversation.id().equals(chatId) && busy) ensureThread(root, input);
+                });
+            } catch (Exception e) {
+                main.post(() -> { if (generation == attempt && conversation.id().equals(chatId)) fail(e.getMessage()); });
+            }
         });
         return true;
     }

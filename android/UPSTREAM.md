@@ -20,7 +20,7 @@ verify the Android runtime again.
 Runtime sources and licenses:
 
 - [Codex Termux](https://github.com/DioNanos/codex-termux), Apache-2.0
-- [Termux package build recipes and patches](https://github.com/termux/termux-packages)
+- [Termux package build recipes and patches](https://github.com/termux/termux-packages/tree/43b9bf012486bd913d603f7bf0d3f6fddd419a8d)
 - [Termux PRoot](https://github.com/termux/proot), GPL-2.0
 - [talloc](https://talloc.samba.org/), LGPL-3.0-or-later
 - [libandroid-shmem](https://github.com/termux/libandroid-shmem), MIT

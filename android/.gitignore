@@ -8,3 +8,4 @@ app/src/main/jniLibs/
 *.keystore
 __pycache__/
 output/
+.build-logs/
